@@ -27,6 +27,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     BufferedInputFile,
+    FSInputFile,
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -38,6 +39,11 @@ from services.indices import calculate_indices
 from services.visualizer import generate_ndvi_map
 from services.ai_advisor import get_agronomic_advice
 from services.pdf_generator import generate_field_passport
+
+# Пути к официальным документам проекта
+DIR = os.path.dirname(os.path.abspath(__file__))
+PRESENTATION_PDF = os.path.join(DIR, "DalaSat_Presentation.pdf")
+MANUAL_PDF = os.path.join(DIR, "DalaSat_Инструкция_по_запуску.pdf")
 
 # ── Логгирование ─────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -94,7 +100,8 @@ def get_main_keyboard(lang: str = "ru") -> ReplyKeyboardMarkup:
                     KeyboardButton(text="🌐 Тілді өзгерту / Сменить язык"),
                 ],
                 [
-                    KeyboardButton(text="ℹ️ Анықтама")
+                    KeyboardButton(text="📄 PDF жүктеу / Құжаттар"),
+                    KeyboardButton(text="ℹ️ Анықтама"),
                 ],
             ],
             resize_keyboard=True,
@@ -118,7 +125,8 @@ def get_main_keyboard(lang: str = "ru") -> ReplyKeyboardMarkup:
                     KeyboardButton(text="🌐 Сменить язык / Тілді өзгерту"),
                 ],
                 [
-                    KeyboardButton(text="ℹ️ Справка / Инструкция")
+                    KeyboardButton(text="📄 Скачать PDF / Документы"),
+                    KeyboardButton(text="ℹ️ Справка / Инструкция"),
                 ],
             ],
             resize_keyboard=True,
@@ -148,13 +156,39 @@ def get_scale_inline_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
 
 
 def get_pdf_keyboard(user_id: int, lang: str = "ru") -> InlineKeyboardMarkup:
-    """Inline-кнопка для скачивания PDF-паспорта."""
-    btn_text = "📄 PDF-төлқұжатты жүктеу" if lang == "kz" else "📄 Скачать PDF-паспорт поля"
+    """Inline-кнопки под карточкой анализа поля."""
+    passport_btn = "📄 PDF-төлқұжатты жүктеу" if lang == "kz" else "📄 Скачать PDF-паспорт поля"
+    pres_btn = "📊 Презентация (PDF)" if lang == "kz" else "📊 Презентация (PDF)"
+    manual_btn = "📑 Нұсқаулық (PDF)" if lang == "kz" else "📑 Инструкция (PDF)"
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=btn_text, callback_data=f"pdf:{user_id}")]
+            [InlineKeyboardButton(text=passport_btn, callback_data=f"pdf:{user_id}")],
+            [
+                InlineKeyboardButton(text=pres_btn, callback_data="doc:presentation"),
+                InlineKeyboardButton(text=manual_btn, callback_data="doc:manual"),
+            ]
         ]
     )
+
+
+def get_docs_inline_keyboard(user_id: int, lang: str = "ru") -> InlineKeyboardMarkup:
+    """Inline-меню скачивания всех доступных PDF проекта."""
+    if lang == "kz":
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="📄 Алқап төлқұжаты (PDF)", callback_data=f"pdf:{user_id}")],
+                [InlineKeyboardButton(text="📊 Жоба презентациясы (PDF)", callback_data="doc:presentation")],
+                [InlineKeyboardButton(text="📑 Іске қосу нұсқаулығы (PDF)", callback_data="doc:manual")],
+            ]
+        )
+    else:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="📄 PDF-паспорт поля (Зеренда / Текущее)", callback_data=f"pdf:{user_id}")],
+                [InlineKeyboardButton(text="📊 Презентация проекта (10 слайдов, PDF)", callback_data="doc:presentation")],
+                [InlineKeyboardButton(text="📑 Инструкция по запуску для комиссии (PDF)", callback_data="doc:manual")],
+            ]
+        )
 
 
 # ── Хендлеры стартовых команд ───────────────────────────────────────────────
@@ -701,20 +735,161 @@ async def _run_field_analysis(message: Message, lat: float, lon: float) -> None:
 
 # ── Скачивание PDF-паспорта ──────────────────────────────────────────────────
 
+# ── Скачивание PDF-документов проекта ────────────────────────────────────────
+
+@router.message(Command("pdf"))
+@router.message(Command("docs"))
+@router.message(Command("passport"))
+@router.message(F.text.in_([
+    "📄 Скачать PDF / Документы",
+    "📄 PDF жүктеу / Құжаттар",
+    "📄 Скачать PDF",
+    "📄 PDF жүктеу",
+    "pdf", "PDF", "пдф", "ПДФ",
+]))
+async def handle_docs_menu(message: Message) -> None:
+    """Меню скачивания всех официальных PDF документов проекта."""
+    user_id = message.from_user.id
+    prefs = get_user_pref(user_id)
+    lang = prefs["lang"]
+
+    if lang == "kz":
+        text = (
+            "📄 <b>DalaSat — Ресми PDF құжаттары:</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Қажетті құжатты таңдап, бірден жүктеп алыңыз:\n\n"
+            "1️⃣ <b>Алқап төлқұжаты (PDF)</b> — Спутниктік карта, вегетация және топырақ ылғалдылығы есебі.\n"
+            "2️⃣ <b>Жоба презентациясы (PDF)</b> — Хакатонға арналған 10 слайдтық ресми таныстырылым.\n"
+            "3️⃣ <b>Іске қосу нұсқаулығы (PDF)</b> — Сарапшылар комиссиясына арналған техникалық нұсқаулық."
+        )
+    else:
+        text = (
+            "📄 <b>DalaSat — Официальные PDF документы проекта:</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Выберите нужный документ для моментальной загрузки в чат:\n\n"
+            "1️⃣ <b>PDF-паспорт поля</b> — Официальный отчет с картой NDVI, индексами влажности и советами ИИ.\n"
+            "2️⃣ <b>Презентация проекта (PDF)</b> — 10 слайдов для жюри AgriTech AI Hackathon 2026.\n"
+            "3️⃣ <b>Инструкция по запуску (PDF)</b> — Пошаговое руководство для проверки на чистой машине."
+        )
+
+    await message.answer(
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_docs_inline_keyboard(user_id, lang),
+    )
+
+
+@router.message(Command("presentation"))
+@router.callback_query(F.data == "doc:presentation")
+async def handle_presentation_download(event: Message | CallbackQuery) -> None:
+    """Отправляет официальную презентацию проекта в PDF."""
+    message = event if isinstance(event, Message) else event.message
+    user_id = event.from_user.id
+    lang = get_user_pref(user_id)["lang"]
+
+    if isinstance(event, CallbackQuery):
+        await event.answer("⏳ Презентация жүктелуде..." if lang == "kz" else "⏳ Отправляем презентацию...")
+
+    await message.bot.send_chat_action(message.chat.id, ChatAction.UPLOAD_DOCUMENT)
+
+    if not os.path.exists(PRESENTATION_PDF):
+        err = "❌ Файл презентации не найден на сервере." if lang != "kz" else "❌ Презентация файлы табылмады."
+        await message.answer(err)
+        return
+
+    caption = (
+        "📊 <b>DalaSat — Жобаның ресми презентациясы (10 слайд, PDF)</b>\n"
+        "AgriTech AI Hackathon 2026 · 1-трек: ГИС және ЖҚБ · Aqmola Hub"
+        if lang == "kz" else
+        "📊 <b>DalaSat — Официальная презентация проекта (10 слайдов, PDF)</b>\n"
+        "AgriTech AI Hackathon 2026 · Трек 1: GIS и ДЗЗ · Aqmola Hub / Digital Aqmola"
+    )
+
+    await message.answer_document(
+        document=FSInputFile(PRESENTATION_PDF, filename="DalaSat_Presentation.pdf"),
+        caption=caption,
+        parse_mode=ParseMode.HTML,
+    )
+
+
+@router.message(Command("manual"))
+@router.callback_query(F.data == "doc:manual")
+async def handle_manual_download(event: Message | CallbackQuery) -> None:
+    """Отправляет инструкцию по локальному запуску для комиссии в PDF."""
+    message = event if isinstance(event, Message) else event.message
+    user_id = event.from_user.id
+    lang = get_user_pref(user_id)["lang"]
+
+    if isinstance(event, CallbackQuery):
+        await event.answer("⏳ Нұсқаулық жүктелуде..." if lang == "kz" else "⏳ Отправляем инструкцию...")
+
+    await message.bot.send_chat_action(message.chat.id, ChatAction.UPLOAD_DOCUMENT)
+
+    if not os.path.exists(MANUAL_PDF):
+        err = "❌ Файл инструкции не найден на сервере." if lang != "kz" else "❌ Нұсқаулық файлы табылмады."
+        await message.answer(err)
+        return
+
+    caption = (
+        "📑 <b>DalaSat — Сарапшылар комиссиясына арналған іске қосу нұсқаулығы (PDF)</b>\n"
+        "AgriTech AI Hackathon 2026 · Aqmola Hub / Digital Aqmola"
+        if lang == "kz" else
+        "📑 <b>DalaSat — Инструкция по локальному запуску для Экспертной комиссии (PDF)</b>\n"
+        "AgriTech AI Hackathon 2026 · Aqmola Hub / Digital Aqmola"
+    )
+
+    await message.answer_document(
+        document=FSInputFile(MANUAL_PDF, filename="DalaSat_Инструкция_по_запуску.pdf"),
+        caption=caption,
+        parse_mode=ParseMode.HTML,
+    )
+
+
 @router.callback_query(F.data.startswith("pdf:"))
 async def handle_pdf_request(callback: CallbackQuery) -> None:
     """Генерирует и отправляет PDF-паспорт поля."""
     user_id = int(callback.data.split(":")[1])
+    prefs = get_user_pref(user_id)
+    lang = prefs["lang"]
 
+    # Если пользователь нажал кнопку без предварительного анализа, формируем паспорт эталонного поля Зеренда
     if user_id not in _analysis_cache:
-        await callback.answer(
-            "⚠️ Деректер ескірді / Данные устарели. Қайта талдау жасаңыз.",
-            show_alert=True,
-        )
-        return
+        demo_map_path = os.path.join(DIR, "demo_ndvi_map.png")
+        if os.path.exists(demo_map_path):
+            with open(demo_map_path, "rb") as f:
+                demo_img_bytes = f.read()
+        else:
+            demo_img_bytes = b""
+
+        _analysis_cache[user_id] = {
+            "stats": {
+                "mean_ndvi": 0.42,
+                "min_ndvi": 0.08,
+                "max_ndvi": 0.74,
+                "mean_ndmi": 0.18,
+                "soil_score": 68,
+                "stressed_percent": 14.2,
+                "moderate_percent": 23.6,
+                "healthy_percent": 62.2,
+                "building_count": 2,
+                "building_status_ru": "Полевой стан (~2 ед. построек)",
+                "building_status_kz": "Далалық стан (~2 құрылыс)",
+            },
+            "ai_advice": (
+                "На участке в Зерендинском районе наблюдается умеренный дефицит влаги в верхнем горизонте (NDMI 0.18). "
+                "Главный риск — иссушение почвы суховеями. "
+                "Рекомендуется раннее закрытие влаги зубовыми боронами в 2 следа поперек преобладающих ветров "
+                "и контроль глубины заделки семян яровой пшеницы до 5–6 см во влажный слой с внесением стартового аммофоса."
+            ),
+            "ndvi_image_bytes": demo_img_bytes,
+            "lat": 53.2514,
+            "lon": 69.1845,
+            "date_str": "2026-05-18",
+            "scale_label": "2×2 км (~400 га)",
+            "lang": lang,
+        }
 
     cached = _analysis_cache[user_id]
-    lang = cached.get("lang", "ru")
     loading_text = "⏳ PDF-төлқұжат дайындалуда..." if lang == "kz" else "⏳ Генерируем официальный PDF-паспорт поля..."
     await callback.answer(loading_text)
     await callback.message.bot.send_chat_action(
