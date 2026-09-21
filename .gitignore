@@ -1,0 +1,28 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments
+.env
+.venv/
+env/
+venv/
+ENV/
+
+# Logs & Debug
+*.log
+gdal_debug.log
+
+# Temporary / OS files
+.DS_Store
+Thumbs.db
+*.tmp
+.idea/
+.vscode/
+
+# Local test scratch
+test_*.pdf
+test_*.html
+test_*.png
