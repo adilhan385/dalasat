@@ -7,6 +7,7 @@ bot.py
 
 import os
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
+print("⏳ Запуск DalaSat Bot... Загрузка библиотек спутникового анализа и ИИ...")
 
 import asyncio
 import logging
@@ -957,4 +958,7 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        print("\n🛑 DalaSat Bot успешно остановлен пользователем (Ctrl+C).")
